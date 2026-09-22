@@ -1,0 +1,18 @@
+services:
+  browser-use:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BU_CDP_URL: http://127.0.0.1:9222
+    ports:
+      # Bind only to the host's Tailscale address; never publish these on the
+      # public interface. Set TAILSCALE_IP in .env.
+      - "${TAILSCALE_IP:?Set TAILSCALE_IP in .env}:8080:8080"
+      - "${TAILSCALE_IP:?Set TAILSCALE_IP in .env}:5900:5900"
+      - "${TAILSCALE_IP:?Set TAILSCALE_IP in .env}:6080:6080"
+      - "${TAILSCALE_IP:?Set TAILSCALE_IP in .env}:9222:9222"
+    shm_size: 2gb
+    volumes:
+      - ./artifacts:/app/artifacts

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 420" role="img" aria-labelledby="title desc">
+  <title id="title">Rove</title>
+  <desc id="desc">Rove, a browser that works from a sentence.</desc>
+  <style>
+    @import url("https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,600,700&amp;display=swap");
+  </style>
+  <rect width="1600" height="420" fill="#090d11"/>
+  <g opacity=".18" stroke="#75e3f2" stroke-width="1">
+    <path d="M0 84h1600M0 168h1600M0 252h1600M0 336h1600"/>
+    <path d="M160 0v420M320 0v420M480 0v420M640 0v420M800 0v420M960 0v420M1120 0v420M1280 0v420M1440 0v420"/>
+  </g>
+  <circle cx="1290" cy="210" r="180" fill="none" stroke="#75e3f2" stroke-width="2" opacity=".28"/>
+  <ellipse cx="1290" cy="210" rx="72" ry="180" fill="none" stroke="#75e3f2" stroke-width="1.5" opacity=".3"/>
+  <ellipse cx="1290" cy="210" rx="180" ry="72" fill="none" stroke="#75e3f2" stroke-width="1.5" opacity=".3"/>
+  <path d="M1110 210h360M1290 30v360" fill="none" stroke="#75e3f2" stroke-width="1" opacity=".24"/>
+  <g transform="translate(112 112) scale(3.05)">
+    <rect x="4" y="4" width="56" height="56" rx="18" fill="#0d1b21" stroke="#24383f"/>
+    <path d="M17 45V24a7 7 0 0 1 7-7h16" fill="none" stroke="#75e3f2" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+    <path d="M47 19v21a7 7 0 0 1-7 7H24" fill="none" stroke="#edf5f7" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+    <circle cx="40" cy="17" r="4" fill="#f3a06b"/>
+  </g>
+  <text x="360" y="210" fill="#edf5f7" font-family="Cabinet Grotesk, Helvetica Neue, Arial, sans-serif" font-size="108" font-weight="600" letter-spacing="-3">rove</text>
+  <text x="368" y="270" fill="#8da0a7" font-family="Cabinet Grotesk, Helvetica Neue, Arial, sans-serif" font-size="20" font-weight="400" letter-spacing="0">Describe the outcome. Watch a real browser navigate, click, and finish the job in front of you.</text>
+</svg>
