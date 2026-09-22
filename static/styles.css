@@ -843,6 +843,19 @@ textarea:focus-visible {
   box-shadow: 0 0 0 4px rgba(117, 227, 242, 0.12);
 }
 
+:root[data-theme="light"] .topbar-center .status-dot {
+  background: var(--orange);
+  box-shadow: 0 0 0 4px rgba(243, 160, 107, 0.14);
+}
+
+:root[data-theme="light"] .card-glyph {
+  color: var(--orange);
+}
+
+:root[data-theme="light"] .input-prefix {
+  color: var(--orange);
+}
+
 :root[data-theme="light"] .browser-signal-top .status-dot {
   background: var(--orange);
   box-shadow: 0 0 0 4px rgba(243, 160, 107, 0.14);
@@ -1234,6 +1247,35 @@ textarea:focus {
   text-align: right;
 }
 
+.result-items,
+.session-result-items {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.95rem 0 0;
+  padding-left: 1.35rem;
+}
+
+.result-items:empty {
+  display: none;
+}
+
+.result-items li,
+.session-result-items li {
+  padding: 0.55rem 0 0.55rem 0.35rem;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.result-items li::marker,
+.session-result-items li::marker {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+}
+
 .result-source {
   display: inline-flex;
   gap: 0.6rem;
@@ -1428,6 +1470,10 @@ textarea:focus {
   margin: 0;
   color: var(--ink);
   text-align: right;
+}
+
+.session-result-items {
+  margin-top: 0.85rem;
 }
 
 .session-result-source {

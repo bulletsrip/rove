@@ -78,7 +78,7 @@ def action_space(actions):
     return elements, targets, controls
 
 
-def choose(state, goal, history):
+def choose(state, goal, history, continuation_context=None, run_history_start=0):
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
@@ -104,15 +104,22 @@ def choose(state, goal, history):
             },
             "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
         }
+    request_state = {
+        "page": {k: state[k] for k in ("url", "title", "text")},
+        "elements": elements,
+        "recent_actions": [
+            {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
+        ],
+        "current_request_actions": [
+            {k: h.get(k) for k in ("action", "kind", "text", "page_changed")}
+            for h in history[run_history_start:][-10:]
+        ],
+    }
+    if continuation_context:
+        request_state["continuation_context"] = continuation_context
     body = {
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
-        "state": {
-            "page": {k: state[k] for k in ("url", "title", "text")},
-            "elements": elements,
-            "recent_actions": [
-                {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
-            ],
-        },
+        "state": request_state,
         "questions": questions,
     }
     started = time.perf_counter()

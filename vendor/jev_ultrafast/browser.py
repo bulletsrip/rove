@@ -18,6 +18,20 @@ class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
 
 
+def choose_page_target(targets):
+    pages = [target for target in targets if target.get("type") == "page"]
+    if not pages:
+        return None
+    # Prefer the top-level page. Popup/auth targets expose openerId and are
+    # usually not the page the user is watching in the headful window.
+    return (
+        next((target for target in pages if not target.get("openerId") and target.get("url") == "about:blank"), None)
+        or next((target for target in pages if not target.get("openerId")), None)
+        or next((target for target in pages if target.get("url") == "about:blank"), None)
+        or pages[-1]
+    )
+
+
 def english_google_url(url):
     parts = urlsplit(url)
     if "google" not in (parts.hostname or "").lower().split("."):
@@ -32,9 +46,7 @@ class Browser:
     def __init__(self, url):
         ensure_daemon()
         targets = cdp("Target.getTargets").get("targetInfos", [])
-        pages = [target for target in targets if target.get("type") == "page"]
-        visible = next((target for target in pages if target.get("url") == "about:blank"), None)
-        visible = visible or (pages[0] if pages else None)
+        visible = choose_page_target(targets)
         self.target = visible["targetId"] if visible else cdp(
             "Target.createTarget", url="about:blank", background=False
         )["targetId"]
@@ -161,6 +173,19 @@ def browser_operation(request):
         kind = action["kind"]
         if kind == "scroll":
             call("Input.dispatchMouseEvent", type="mouseWheel", x=550, y=650, deltaX=0, deltaY=action["delta"])
+        elif kind == "back":
+            navigation = call("Page.getNavigationHistory")
+            current = navigation.get("currentIndex", 0)
+            entries = navigation.get("entries", [])
+            if current > 0 and entries:
+                call("Page.navigateToHistoryEntry", entryId=entries[current - 1]["id"])
+        elif kind == "reload":
+            call("Page.reload", ignoreCache=False)
+        elif kind == "key":
+            key = action.get("key", "Enter")
+            code = action.get("code", key)
+            call("Input.dispatchKeyEvent", type="keyDown", key=key, code=code)
+            call("Input.dispatchKeyEvent", type="keyUp", key=key, code=code)
         elif kind != "wait":
             if type(action["node"]) is not int:
                 raise ValueError("Invalid observed node")

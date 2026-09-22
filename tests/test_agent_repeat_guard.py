@@ -97,6 +97,55 @@ class AgentRepeatGuardTest(unittest.TestCase):
         self.assertEqual(len(snapshot["history"]), 3)
         self.assertEqual([entry["action"] for entry in snapshot["history"]], ["Search"] * 3)
 
+    def test_standalone_primitive_finishes_after_one_execution(self):
+        page = {
+            "url": "https://example.test",
+            "title": "Example",
+            "text": "",
+            "fingerprint": "same-page",
+            "actions": [{"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560}],
+        }
+
+        class Browser:
+            def fresh(self, current_page, action=None):
+                return True
+
+            def act(self, action, current_page, text=None):
+                return {"executed": action["id"]}
+
+            def observe(self, screenshot=True):
+                return page
+
+        agent = Agent.__new__(Agent)
+        agent.pending_text = None
+        agent.stop_event = None
+        agent.repeat_key = None
+        agent.repeat_count = 0
+        agent.screenshots = False
+        agent.state = {
+            "browser": Browser(),
+            "goal": "Scroll down",
+            "page": page,
+            "decision": {
+                "choice": "scroll_down",
+                "operation": "SCROLL_DOWN",
+                "target": None,
+                "probabilities": {"scroll_down": 1.0},
+                "confidence": 1.0,
+                "latency_ms": 0,
+                "usage": {},
+            },
+            "history": [],
+            "status": "ready",
+            "started_at": time.perf_counter(),
+            "run_history_start": 0,
+            "record": False,
+        }
+
+        snapshot = agent.command("act", {"fingerprint": "same-page"})
+
+        self.assertEqual(snapshot["status"], "done")
+        self.assertEqual(len(snapshot["history"]), 1)
 
 if __name__ == "__main__":
     unittest.main()

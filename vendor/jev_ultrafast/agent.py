@@ -1,12 +1,22 @@
 """The complete agent loop. Typed choices, observable state, bounded execution."""
 
 import base64
+import re
 import time
 from pathlib import Path
 
 from .browser import Browser, StalePage
 from .model import action_space, choose, field_context, field_text
 from .questions import MAX_STEPS
+
+
+def _is_single_primitive_goal(goal):
+    """Whether a targetless browser primitive is the complete user request."""
+    normalized = re.sub(r"\s+", " ", (goal or "").strip().lower())
+    return not re.search(
+        r"\b(?:and|then|until|while|before|after|to\s+(?:find|see|reach|open|read|get|extract|submit))\b",
+        normalized,
+    )
 
 
 class Agent:
@@ -39,6 +49,7 @@ class Agent:
             plan_index=0,
             decisions=[],
             text_calls=[],
+            continuation_context=None,
             elapsed_ms=0,
             started_at=None,
             run_history_start=0,
@@ -49,7 +60,7 @@ class Agent:
             if page.get("screenshot"):
                 (self.record_dir / "000000.jpg").write_bytes(base64.b64decode(page["screenshot"]))
 
-    def continue_with(self, goal):
+    def continue_with(self, goal, *, context=None):
         """Start a follow-up run while preserving the current page and history."""
         task = goal.strip() if isinstance(goal, str) else "\n".join(goal).strip()
         if not task:
@@ -60,9 +71,15 @@ class Agent:
         self.pending_text = None
         self.repeat_key = None
         self.repeat_count = 0
+        context = context or {}
+        continuation_context = {
+            "previous_goal": context.get("previous_goal") or self.state.get("goal", ""),
+            "previous_result": context.get("previous_result"),
+        }
         self.state.update(
             goal=task,
             goal_history=[*self.state.get("goal_history", []), task],
+            continuation_context=continuation_context,
             decision=None,
             status="ready",
             plan=[task],
@@ -106,7 +123,13 @@ class Agent:
                 raise ValueError("This run has stopped. Start a fresh demo.")
             if len(state["decisions"]) >= MAX_STEPS * 2:
                 raise ValueError("Reached the demo's model-call budget")
-            state["decision"] = choose(state["page"], state["goal"], state["history"])
+            state["decision"] = choose(
+                state["page"],
+                state["goal"],
+                state["history"],
+                state.get("continuation_context"),
+                state.get("run_history_start", 0),
+            )
             state["decisions"].append(
                 {
                     **state["decision"],
@@ -194,11 +217,8 @@ class Agent:
                 (self.record_dir / f"{state['elapsed_ms']:06d}.jpg").write_bytes(
                     base64.b64decode(state["page"]["screenshot"])
                 )
-            state["status"] = (
-                "blocked"
-                if repeat_block
-                else "ready"
-            )
+            single_primitive = action["kind"] in {"scroll", "back", "reload", "key"} and _is_single_primitive_goal(state["goal"])
+            state["status"] = "done" if single_primitive else ("blocked" if repeat_block else "ready")
         else:
             raise ValueError("Unknown command")
         return self.snapshot()

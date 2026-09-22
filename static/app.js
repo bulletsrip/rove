@@ -25,6 +25,7 @@ const themeLabel = $("theme-label");
 let currentStatus = "idle";
 let sessionCanContinue = false;
 let browserInputEnabled = false;
+let statusGeneration = 0;
 let voiceRecognizer = null;
 let voiceActive = false;
 let voiceBuffer = "";
@@ -141,6 +142,11 @@ function queueVoiceCommand(command) {
   voiceState.textContent = voiceIsBusy() ? "Queued" : "Command ready";
   voiceTranscript.textContent = command;
   maybeRunVoiceQueue();
+}
+
+function invalidateStatusPolls() {
+  statusGeneration += 1;
+  return statusGeneration;
 }
 
 function setVoiceActive(active) {
@@ -282,6 +288,7 @@ function renderResult(result) {
     $("result-kind").textContent = "WAITING";
     $("result-summary").textContent = "Complete a task to see the verified result here.";
     $("result-facts").replaceChildren();
+    $("result-items").replaceChildren();
     $("result-source").hidden = true;
     return;
   }
@@ -298,6 +305,14 @@ function renderResult(result) {
     detail.textContent = value;
     item.append(term, detail);
     facts.appendChild(item);
+  });
+
+  const items = $("result-items");
+  items.replaceChildren();
+  (Array.isArray(result.items) ? result.items : []).forEach((value) => {
+    const item = document.createElement("li");
+    item.textContent = value;
+    items.appendChild(item);
   });
 
   const source = $("result-source");
@@ -357,6 +372,18 @@ function renderResultHistory(history) {
     });
     if (facts.childElementCount) card.appendChild(facts);
 
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (items.length) {
+      const itemList = document.createElement("ol");
+      itemList.className = "session-result-items";
+      items.forEach((value) => {
+        const item = document.createElement("li");
+        item.textContent = value;
+        itemList.appendChild(item);
+      });
+      card.appendChild(itemList);
+    }
+
     const sourceUrl = typeof result.source_url === "string" && /^https?:\/\//i.test(result.source_url) ? result.source_url : "";
     if (sourceUrl) {
       const source = document.createElement("a");
@@ -393,6 +420,7 @@ function render(snapshot) {
   $("browser-title").textContent = status === "extracting" ? "Reading the result" : isBusy ? "Session in progress" : ["done", "answered"].includes(status) ? "Session complete" : "Waiting for a session";
   $("session-url").textContent = snapshot.url || "No active page";
   $("frame-address").textContent = snapshot.url || "about:blank";
+  if (snapshot.url && status !== "idle" && document.activeElement !== $("url")) $("url").value = snapshot.url;
   $("context-value").textContent = snapshot.goal || "No task loaded";
   $("error").hidden = !snapshot.error;
   $("error").textContent = snapshot.error || "";
@@ -414,6 +442,7 @@ async function submitTask(continuation) {
   const url = $("url").value.trim();
   const goal = $("goal").value.trim();
   if (!goal || (!continuation && !url)) return;
+  invalidateStatusPolls();
 
   const previous = {
     url: continuation ? $("session-url").textContent : url,
@@ -445,6 +474,7 @@ async function stopTask() {
   voiceQueue.length = 0;
   voiceBuffer = "";
   clearTimeout(voiceFinalizeTimer);
+  invalidateStatusPolls();
   stopButton.disabled = true;
   try {
     const response = await fetch("/api/tasks/stop", { method: "POST" });
@@ -468,10 +498,12 @@ async function startFresh() {
   voiceQueue.length = 0;
   voiceBuffer = "";
   clearTimeout(voiceFinalizeTimer);
+  const requestGeneration = invalidateStatusPolls();
   freshButton.disabled = true;
   try {
     const response = await fetch("/api/sessions", { method: "POST" });
     const payload = await response.json();
+    if (requestGeneration !== statusGeneration) return;
     if (!response.ok) {
       render({ status: "error", error: payload.error });
       return;
@@ -528,9 +560,10 @@ notifyLiveTheme();
 initMotion();
 
 setInterval(async () => {
+  const requestGeneration = statusGeneration;
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
-    if (response.ok) render(await response.json());
+    if (response.ok && requestGeneration === statusGeneration) render(await response.json());
   } catch (_) {
     // The next poll will restore the live state.
   }

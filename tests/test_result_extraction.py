@@ -50,6 +50,104 @@ class ResultExtractionTest(unittest.TestCase):
         self.assertEqual(result["facts"]["distance"], "12.4 km")
         self.assertEqual(result["source_url"], "https://maps.google.com/")
 
+    def test_scrape_result_preserves_each_visible_item(self):
+        def request_json(url, key, body):
+            prompt = body["messages"][0]["content"].lower()
+            self.assertIn("scrape", prompt)
+            self.assertIn("items", prompt)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "kind": "answer",
+                                    "summary": "Found two visible comments.",
+                                    "facts": {},
+                                    "items": ["First comment", "Second comment"],
+                                    "source_url": "https://www.youtube.com/watch?v=example",
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+        result = extract_result(
+            "Scrape all the comments from this video",
+            {
+                "url": "https://www.youtube.com/watch?v=example",
+                "title": "Example video",
+                "text": "First comment\nSecond comment",
+            },
+            [],
+            request_json=request_json,
+            api_key="test-key",
+            base_url="https://api.example.test",
+        )
+
+        self.assertEqual(result["kind"], "answer")
+        self.assertEqual(result["items"], ["First comment", "Second comment"])
+
+    def test_information_request_cannot_be_reported_as_empty_completion(self):
+        def request_json(url, key, body):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "kind": "completion",
+                                    "summary": "Scraped the comments.",
+                                    "facts": {},
+                                    "source_url": "https://www.youtube.com/watch?v=example",
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+        result = extract_result(
+            "Scrape all the comments from this video",
+            {"url": "https://www.youtube.com/watch?v=example", "title": "Example", "text": ""},
+            [],
+            request_json=request_json,
+            api_key="test-key",
+            base_url="https://api.example.test",
+        )
+
+        self.assertEqual(result["kind"], "needs_review")
+
+    def test_action_completion_does_not_require_a_matching_previous_action(self):
+        def request_json(url, key, body):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "kind": "completion",
+                                    "summary": "The page was scrolled up.",
+                                    "facts": {},
+                                    "source_url": "https://www.tiktok.com/",
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+        result = extract_result(
+            "Scroll up",
+            {"url": "https://www.tiktok.com/", "title": "TikTok", "text": "For You"},
+            [{"action": "Collapse sidebar"}],
+            request_json=request_json,
+            api_key="test-key",
+            base_url="https://api.example.test",
+        )
+
+        self.assertEqual(result["kind"], "completion")
 
 if __name__ == "__main__":
     unittest.main()

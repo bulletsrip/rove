@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -10,7 +11,7 @@ RESULT_SYSTEM_PROMPT = """You are Rove's final result verifier.
 
 Decide whether the user's goal is an information request or an action request.
 Return one JSON object with exactly these keys:
-kind, summary, facts, source_url
+kind, summary, facts, items, source_url
 
 kind must be one of:
 - answer: the final observed page contains the requested information
@@ -20,7 +21,11 @@ kind must be one of:
 Rules:
 - Use only the supplied final page snapshot. Never invent, estimate, or use outside knowledge.
 - Preserve names, places, and search terms exactly as observed.
-- facts must be an object of short label/value strings. Use {} for completion or needs_review when appropriate.
+- Requests using words such as scrape, scrap, extract, collect, list, enumerate, show, return, or give me are information requests. They must produce answer data when that data is visible; do not label them completion just because the browser performed the scraping.
+- facts must be an object of short label/value strings. Use {} when there are no useful single-value facts.
+- items must be a list of strings. For a request to scrape, extract, collect, or list multiple things, put each visible item in items in page order. Do not collapse a list into a completion sentence.
+- “All” means all matching items visible in the supplied final page snapshot. Do not claim to have data that is not in the snapshot.
+- Action history is context only, not a prerequisite for completion. Judge the final page and the model's result; do not reject an action result solely because a phrase is absent from recent_actions. Do not invent a “prior action required” error. If the final page still visibly contradicts the requested outcome, use needs_review and describe the visible state.
 - summary must be concise and useful to the user.
 - source_url must be the supplied page URL unless the page visibly provides a more specific source URL.
 """
@@ -39,7 +44,17 @@ def _parse_content(content):
     return json.loads(content)
 
 
-def _validate_result(value, fallback_url):
+def is_information_request(goal):
+    return bool(
+        re.search(
+            r"\b(?:scrap(?:e|ing|ed)?|extract(?:ed|ion)?|collect|list|enumerate|show|return|give me|tell me|how (?:many|much|is|are)|what (?:is|are)|which|where|when|who|read|calculate|compare|distance|price|cost|address|email|phone|title|name|details|information|result)\b",
+            goal or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _validate_result(value, fallback_url, *, goal="", history=None):
     if not isinstance(value, dict):
         raise ValueError("Result model returned an invalid object")
     kind = value.get("kind")
@@ -54,6 +69,13 @@ def _validate_result(value, fallback_url):
         for key, item in facts.items()
     ):
         raise ValueError("Result model returned invalid facts")
+    items = value.get("items", [])
+    if not isinstance(items, list) or len(items) > 500 or any(
+        not isinstance(item, str) or not item.strip() or len(item) > 2000 for item in items
+    ):
+        raise ValueError("Result model returned invalid items")
+    if is_information_request(goal) and kind == "completion":
+        kind = "answer" if facts or items else "needs_review"
     source_url = value.get("source_url") or fallback_url
     if not isinstance(source_url, str) or not urlparse(source_url).scheme:
         source_url = fallback_url
@@ -61,6 +83,7 @@ def _validate_result(value, fallback_url):
         "kind": kind,
         "summary": summary.strip(),
         "facts": facts,
+        "items": items,
         "source_url": source_url,
     }
 
@@ -77,7 +100,7 @@ def extract_result(goal, page, history, *, request_json: Callable | None = None,
     base_url = (base_url or os.getenv("TEXT_MODEL_BASE_URL", "https://api.deepseek.com/v1")).rstrip("/")
     body = {
         "model": os.getenv("TEXT_MODEL", "deepseek-chat"),
-        "max_tokens": 700,
+        "max_tokens": 3000,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": RESULT_SYSTEM_PROMPT},
@@ -104,6 +127,6 @@ def extract_result(goal, page, history, *, request_json: Callable | None = None,
     response = request_json(base_url + "/chat/completions", api_key, body)
     try:
         content = response["choices"][0]["message"]["content"]
-        return _validate_result(_parse_content(content), page.get("url", ""))
+        return _validate_result(_parse_content(content), page.get("url", ""), goal=goal, history=history)
     except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("Result model returned an invalid response") from exc

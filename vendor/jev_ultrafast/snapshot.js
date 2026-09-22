@@ -23,8 +23,9 @@
   };
   const roles=['button','link','checkbox','radio','switch','tab','menuitem','menuitemradio',
     'option','gridcell','combobox','textbox','searchbox','spinbutton'];
+  const closeSelector='[data-e2e*="close" i],[data-testid*="close" i],[class*="close" i]';
   const selector='a[href],button,input,textarea,select,summary,[contenteditable="true"],'+
-    roles.map(role=>'[role="'+role+'"]').join(',');
+    roles.map(role=>'[role="'+role+'"]').join(',')+','+closeSelector;
   const role = e => {
     const explicit=e.getAttribute('role');
     if (roles.includes(explicit)) return explicit;
@@ -55,10 +56,10 @@
   const actions=[];
   for (const e of document.querySelectorAll(selector)) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
-    const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
+    const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e) || (e.matches(closeSelector) ? 'button' : null);
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
-    const base={node:identity(e),role:rname,label:name(e)||rname,
+    const base={node:identity(e),role:rname,label:name(e)||(e.matches(closeSelector) ? 'Close' : rname),
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
@@ -99,8 +100,14 @@
   const omitted_actions=Math.max(0,actions.length-250);
   actions.splice(250);
   actions.forEach((a,i)=>a.id='e'+(i+1));
-  if (scrollY+innerHeight<height-2) actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:560});
-  if (scrollY>0) actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-560});
+  // Targetless browser primitives are always offered to the model. The model
+  // decides whether they advance the current goal; the executor remains the
+  // single place that performs them.
+  actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:560});
+  actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-560});
+  if (history.length>1) actions.push({id:'back',kind:'back',label:'Go back'});
+  actions.push({id:'reload',kind:'reload',label:'Reload the page'});
+  actions.push({id:'key_enter',kind:'key',label:'Press Enter',key:'Enter',code:'Enter'});
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
   return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
     scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions};

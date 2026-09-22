@@ -87,6 +87,43 @@ class AgentContinuationTest(unittest.TestCase):
         self.assertEqual(agent.state["goal_history"], ["Open the map", "Now search for Tebet"])
         self.assertEqual(agent.state["history"], [{"step": 1, "action": "Open maps"}])
 
+    def test_follow_up_keeps_previous_goal_and_result_as_context(self):
+        agent = Agent.__new__(Agent)
+        agent.pending_text = None
+        agent.state = {
+            "browser": object(),
+            "goal": "Open maps",
+            "goal_history": ["Open maps"],
+            "page": {"url": "https://maps.google.com", "fingerprint": "page-2", "actions": []},
+            "decision": None,
+            "history": [],
+            "status": "answered",
+            "plan": ["Open maps"],
+            "plan_index": 1,
+            "decisions": [],
+            "text_calls": [],
+            "elapsed_ms": 0,
+            "started_at": None,
+            "run_history_start": 0,
+            "record": False,
+        }
+
+        agent.continue_with(
+            "Use that result to compare another route",
+            context={
+                "previous_goal": "Open maps",
+                "previous_result": {"kind": "answer", "summary": "The route is 12.4 km."},
+            },
+        )
+
+        self.assertEqual(
+            agent.state["continuation_context"],
+            {
+                "previous_goal": "Open maps",
+                "previous_result": {"kind": "answer", "summary": "The route is 12.4 km."},
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

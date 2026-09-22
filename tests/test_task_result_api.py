@@ -26,6 +26,7 @@ import app.server as server
 class FakeAgent:
     def __init__(self, url, goal, screenshots=False):
         self.continuations = []
+        self.continuation_contexts = []
         self.state = {
             "status": "done",
             "goal": goal,
@@ -46,8 +47,9 @@ class FakeAgent:
     def run(self):
         yield {"status": "done", "history": []}
 
-    def continue_with(self, goal):
+    def continue_with(self, goal, context=None):
         self.continuations.append(goal)
+        self.continuation_contexts.append(context)
         self.state["goal"] = goal
 
     def close(self):
@@ -58,6 +60,12 @@ class StoppedAgent(FakeAgent):
     def run(self):
         self.state["status"] = "stopped"
         yield {"status": "running", "history": []}
+
+
+class NavigatingAgent(FakeAgent):
+    def run(self):
+        self.state["page"]["url"] = "https://www.youtube.com/watch?v=example"
+        yield {"status": "done", "history": []}
 
 
 class TaskResultApiTest(unittest.TestCase):
@@ -93,8 +101,31 @@ class TaskResultApiTest(unittest.TestCase):
         self.assertEqual(state["result"], result)
         self.assertEqual(state["result_history"], [{"index": 1, "goal": "Search distance of Tanjung Duren to Tebet", "result": result}])
 
+    def test_action_only_task_finishes_without_result_extraction(self):
+        with patch.object(server, "Agent", FakeAgent), patch.object(
+            server, "extract_result", side_effect=AssertionError("action-only tasks should not extract")
+        ):
+            server.execute("https://www.tiktok.com/", "Scroll down")
+
+        state = server.snapshot()
+        self.assertEqual(state["status"], "done")
+        self.assertEqual(state["result"]["kind"], "completion")
+        self.assertEqual(state["result_history"][0]["goal"], "Scroll down")
+
+    def test_status_tracks_the_current_page_url_after_navigation(self):
+        result = {
+            "kind": "completion",
+            "summary": "The page is open.",
+            "facts": {},
+            "source_url": "https://www.youtube.com/watch?v=example",
+        }
+        with patch.object(server, "Agent", NavigatingAgent), patch.object(server, "extract_result", return_value=result):
+            server.execute("https://google.com", "Open the YouTube video")
+
+        self.assertEqual(server.snapshot()["url"], "https://www.youtube.com/watch?v=example")
+
     def test_follow_up_keeps_previous_result_and_adds_latest_result(self):
-        existing = FakeAgent("https://maps.google.com/", "Open maps")
+        existing = FakeAgent("https://maps.google.com/", "Read the map title")
         first_result = {
             "kind": "answer",
             "summary": "The map is open.",
@@ -109,7 +140,7 @@ class TaskResultApiTest(unittest.TestCase):
         }
 
         with patch.object(server, "Agent", return_value=existing), patch.object(server, "extract_result", return_value=first_result):
-            server.execute("https://maps.google.com/", "Open maps")
+            server.execute("https://maps.google.com/", "Read the map title")
         with patch.object(server, "extract_result", return_value=second_result):
             server.execute("", "Find the distance", continuation=True)
 
@@ -124,24 +155,34 @@ class TaskResultApiTest(unittest.TestCase):
             "facts": {},
             "source_url": "https://maps.google.com/",
         }
-        existing = FakeAgent("https://maps.google.com/", "Open maps")
+        existing = FakeAgent("https://maps.google.com/", "Read the map title")
         with server._agent_lock:
             server._agent = existing
         with server._lock:
             server._run.update(
                 status="answered",
                 url="https://maps.google.com/",
-                goal="Open maps",
+                goal="Read the map title",
                 steps=[],
                 result={"kind": "answer"},
             )
 
         with patch.object(server, "extract_result", return_value=result):
-            server.execute("", "Now search for Tebet", continuation=True)
+            server.execute("", "Calculate the distance to Tebet", continuation=True)
 
-        self.assertEqual(existing.continuations, ["Now search for Tebet"])
+        self.assertEqual(existing.continuations, ["Calculate the distance to Tebet"])
+        self.assertEqual(existing.continuation_contexts, [{"previous_goal": "Read the map title", "previous_result": {"kind": "answer"}}])
         self.assertEqual(server.snapshot()["status"], "answered")
-        self.assertEqual(server.snapshot()["goal"], "Now search for Tebet")
+        self.assertEqual(server.snapshot()["goal"], "Calculate the distance to Tebet")
+
+    def test_completed_session_is_marked_resumable_until_explicitly_reset(self):
+        existing = FakeAgent("https://www.youtube.com/watch?v=example", "Open YouTube")
+        with server._agent_lock:
+            server._agent = existing
+        with server._lock:
+            server._run.update(status="answered", can_continue=True)
+
+        self.assertTrue(server.has_resumable_session())
 
     def test_reset_session_clears_completed_session_without_starting_task(self):
         existing = FakeAgent("https://maps.google.com/", "Open maps")
