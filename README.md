@@ -20,6 +20,7 @@ The demo shows a real run that asks Google Maps for the driving distance and tra
 - Executes validated actions through Chrome DevTools Protocol (CDP).
 - Streams the headful browser into the workbench through noVNC.
 - Extracts a verified answer from the final visible page into structured JSON.
+- Runs collection-style goals in bounded passes, merging and deduplicating items across the same browser session.
 - Keeps completed results in the current session so a follow-up instruction can continue from the same page.
 - Supports stopping a run without destroying the browser session, plus starting a fresh session when needed.
 
@@ -86,10 +87,13 @@ This decision-loop diagram is adapted from the [Jev Ultrafast documentation](htt
 
 1. The browser container starts Chromium with a dedicated profile and CDP on port `9222`.
 2. Rove receives a task containing a starting URL and a natural-language goal.
-3. Jev receives the observed page text and a code-built action space. It returns a typed operation, target, probabilities, and confidence.
-4. Rove checks that the target is still fresh and visible, then executes the action through CDP.
-5. The browser is observed again. Every executed action is sent to the UI action history.
-6. When the agent reaches a terminal state, the result verifier reads only the final observed page and returns:
+3. The planner classifies the request as `standard` or `collection` and splits compound goals into independently verifiable objectives.
+4. A planner-selected collection goal enters a bounded multi-pass controller. Each pass uses Jev on the existing page, extracts the visible batch, and merges new items into the session dataset.
+5. Jev receives the current objective, observed page text, and a code-built action space. It returns a typed operation, target, probabilities, and confidence.
+6. Rove checks that the target is still fresh and visible, then executes the action through CDP.
+7. The browser is observed again. Every executed action is sent to the UI action history.
+8. A collection pass continues until no new items appear, the page is blocked, the safety budget is reached, or the user stops it. Each pass is retained in the session result history.
+9. When an objective reaches a terminal state, its result is captured before the next objective starts. After all objectives finish, Rove aggregates the results. The result verifier reads each objective's final observed page and returns:
 
    ```json
    {
@@ -103,7 +107,7 @@ This decision-loop diagram is adapted from the [Jev Ultrafast documentation](htt
    }
    ```
 
-7. The latest result is shown in the result card. Earlier results remain available in the session details view, and a continuation starts from the existing browser page rather than opening a new session.
+10. The aggregate result is shown in the result card. Individual objective and collection-pass results remain available in the session details view, and a continuation starts from the existing browser page rather than opening a new session.
 
 The service has one active task at a time. The Stop control requests cooperative cancellation between browser decisions and preserves the session for continuation.
 
@@ -268,6 +272,8 @@ sudo docker compose build
 
 ```text
 app/server.py                 HTTP API, task lifecycle, continuation, cancellation
+app/planner.py                Model-based task mode and objective planning
+app/long_tasks.py             Bounded collection passes and deduplication
 app/results.py                Final-page result extraction and JSON validation
 static/                       Rove workbench HTML, CSS, JavaScript, and brand assets
 vendor/jev_ultrafast/         Pinned Jev Ultrafast source with Rove lifecycle changes

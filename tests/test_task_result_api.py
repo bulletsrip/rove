@@ -24,7 +24,7 @@ import app.server as server
 
 
 class FakeAgent:
-    def __init__(self, url, goal, screenshots=False):
+    def __init__(self, url, goal, screenshots=False, collection=False):
         self.continuations = []
         self.continuation_contexts = []
         self.state = {
@@ -79,6 +79,9 @@ class TaskResultApiTest(unittest.TestCase):
                 error=None,
                 result=None,
                 result_history=[],
+                long_task=False,
+                iteration=0,
+                collected_items=[],
                 can_continue=False,
                 started_at=None,
             )
@@ -175,6 +178,102 @@ class TaskResultApiTest(unittest.TestCase):
         self.assertEqual(server.snapshot()["status"], "answered")
         self.assertEqual(server.snapshot()["goal"], "Calculate the distance to Tebet")
 
+    def test_compound_plan_runs_each_objective_and_aggregates_results(self):
+        existing = FakeAgent("https://maps.google.com/", "Read Setiabudi")
+        objectives = [
+            {"id": "objective_1", "instruction": "Read Setiabudi"},
+            {"id": "objective_2", "instruction": "Read Benhil"},
+        ]
+        results = [
+            {
+                "kind": "answer",
+                "summary": "Setiabudi is 10 km away.",
+                "facts": {"distance": "10 km"},
+                "source_url": "https://maps.google.com/",
+            },
+            {
+                "kind": "answer",
+                "summary": "Benhil is 8 km away.",
+                "facts": {"distance": "8 km"},
+                "source_url": "https://maps.google.com/",
+            },
+        ]
+        with patch.object(server, "Agent", return_value=existing), patch.object(
+            server, "plan_goal", return_value=objectives
+        ), patch.object(server, "extract_result", side_effect=results):
+            server.execute("https://maps.google.com/", "Compare two destinations")
+
+        state = server.snapshot()
+        self.assertEqual(state["status"], "answered")
+        self.assertEqual(len(state["result_history"]), 2)
+        self.assertEqual(existing.continuations, ["Read Benhil"])
+        self.assertIn("10 km", state["result"]["facts"]["1. Read Setiabudi — distance"])
+        self.assertIn("8 km", state["result"]["facts"]["2. Read Benhil — distance"])
+
+    def test_long_collection_runs_bounded_passes_and_deduplicates_items(self):
+        existing = FakeAgent("https://example.test/gallery", "Scrape every photo")
+        results = [
+            {"kind": "answer", "summary": "First batch", "facts": {}, "items": ["Photo A"], "source_url": "https://example.test/gallery"},
+            {"kind": "answer", "summary": "Second batch", "facts": {}, "items": ["Photo B"], "source_url": "https://example.test/gallery"},
+            {"kind": "answer", "summary": "Same batch", "facts": {}, "items": ["Photo B"], "source_url": "https://example.test/gallery"},
+            {"kind": "answer", "summary": "Same batch", "facts": {}, "items": ["Photo B"], "source_url": "https://example.test/gallery"},
+        ]
+        with patch.object(server, "Agent", return_value=existing), patch.object(
+            server,
+            "plan_goal",
+            return_value={"mode": "collection", "objectives": [{"id": "objective_1", "instruction": "Scrape every photo"}]},
+        ), patch.object(server, "extract_result", side_effect=results):
+            server.execute("https://example.test/gallery", "Scrape every photo")
+
+        state = server.snapshot()
+        self.assertEqual(state["status"], "answered")
+        self.assertTrue(state["long_task"])
+        self.assertEqual(state["collected_items"], ["Photo A", "Photo B"])
+        self.assertEqual(state["result"]["items"], ["Photo A", "Photo B"])
+        self.assertEqual(len(state["result_history"]), 4)
+        self.assertEqual(len(existing.continuations), 3)
+
+    def test_long_collection_continuation_preserves_prior_items(self):
+        existing = FakeAgent("https://example.test/gallery", "Scrape every photo")
+        previous = {
+            "kind": "answer",
+            "summary": "One prior item",
+            "facts": {},
+            "items": ["Photo A"],
+            "source_url": "https://example.test/gallery",
+        }
+        results = [
+            {"kind": "answer", "summary": "New batch", "facts": {}, "items": ["Photo B"], "source_url": "https://example.test/gallery"},
+            {"kind": "answer", "summary": "Same batch", "facts": {}, "items": ["Photo B"], "source_url": "https://example.test/gallery"},
+            {"kind": "answer", "summary": "Same batch", "facts": {}, "items": ["Photo B"], "source_url": "https://example.test/gallery"},
+        ]
+        with server._agent_lock:
+            server._agent = existing
+        with server._lock:
+            server._run.update(
+                status="answered",
+                goal="Scrape every photo",
+                result=previous,
+                result_history=[{"index": 1, "goal": "Scrape every photo", "result": previous}],
+                can_continue=True,
+            )
+        with patch.object(
+            server,
+            "plan_goal",
+            return_value={"mode": "collection", "objectives": [{"id": "objective_1", "instruction": "Scrape every photo"}]},
+        ), patch.object(server, "extract_result", side_effect=results):
+            server.execute(
+                "",
+                "Scrape every photo",
+                continuation=True,
+                continuation_context={"previous_goal": "Scrape every photo", "previous_result": previous},
+            )
+
+        state = server.snapshot()
+        self.assertEqual(state["status"], "answered")
+        self.assertEqual(state["result"]["items"], ["Photo A", "Photo B"])
+        self.assertEqual(state["collected_items"], ["Photo A", "Photo B"])
+
     def test_completed_session_is_marked_resumable_until_explicitly_reset(self):
         existing = FakeAgent("https://www.youtube.com/watch?v=example", "Open YouTube")
         with server._agent_lock:
@@ -183,6 +282,10 @@ class TaskResultApiTest(unittest.TestCase):
             server._run.update(status="answered", can_continue=True)
 
         self.assertTrue(server.has_resumable_session())
+
+    def test_normal_task_endpoint_starts_fresh_even_with_resumable_session(self):
+        self.assertFalse(server.is_continuation_request("/api/tasks"))
+        self.assertTrue(server.is_continuation_request("/api/tasks/continue"))
 
     def test_reset_session_clears_completed_session_without_starting_task(self):
         existing = FakeAgent("https://maps.google.com/", "Open maps")

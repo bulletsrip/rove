@@ -7,6 +7,7 @@ const stopButton = $("stop");
 const primaryActions = document.querySelector(".primary-actions");
 const freshButton = $("fresh");
 const resultDetails = $("result-details");
+const resultExport = $("result-export");
 const sessionResultsDialog = $("session-results-dialog");
 const closeResults = $("close-results");
 const browserStage = $("browser-stage");
@@ -23,6 +24,7 @@ const voiceTranscript = $("voice-transcript");
 const themeToggle = $("theme-toggle");
 const themeLabel = $("theme-label");
 let currentStatus = "idle";
+let latestSnapshot = null;
 let sessionCanContinue = false;
 let browserInputEnabled = false;
 let statusGeneration = 0;
@@ -322,10 +324,11 @@ function renderResult(result) {
   if (sourceUrl) source.href = sourceUrl;
 }
 
-function renderResultHistory(history) {
+function renderResultHistory(history, hasCurrentResult = false) {
   const entries = Array.isArray(history) ? history : [];
   const list = $("session-results-list");
   resultDetails.disabled = entries.length === 0;
+  resultExport.disabled = entries.length === 0 && !hasCurrentResult;
   resultDetails.querySelector("[data-result-count]").textContent = String(entries.length).padStart(2, "0");
   list.replaceChildren();
 
@@ -404,10 +407,21 @@ function renderResultHistory(history) {
 }
 
 function render(snapshot) {
+  latestSnapshot = snapshot;
   const status = safeStatus(snapshot.status);
   currentStatus = status;
   const [title, detail] = stateCopy[status];
   const isBusy = ["starting", "running", "extracting", "stopping"].includes(status);
+  const objectives = Array.isArray(snapshot.objectives) ? snapshot.objectives : [];
+  const currentObjective = objectives[snapshot.objective_index] || null;
+  const completedObjectives = objectives.filter((objective) => ["complete", "needs_review"].includes(objective.status)).length;
+  const objectiveDetail = objectives.length > 1
+    ? isBusy
+      ? `Objective ${(snapshot.objective_index || 0) + 1} of ${objectives.length}: ${currentObjective?.instruction || detail}`
+      : `Completed ${completedObjectives} of ${objectives.length} objectives.`
+    : snapshot.long_task && snapshot.iteration
+      ? `Collection pass ${snapshot.iteration}: ${snapshot.collected_items?.length || 0} unique items collected.`
+    : detail;
   const canContinue = ["done", "answered", "blocked", "stopped", "error"].includes(status)
     && Boolean(snapshot.goal)
     && Boolean(snapshot.can_continue);
@@ -415,7 +429,7 @@ function render(snapshot) {
   const hasSession = Boolean(snapshot.url) || isBusy || ["done", "answered", "blocked", "error", "stopped"].includes(status);
 
   $("state").textContent = title;
-  $("state-detail").textContent = detail;
+  $("state-detail").textContent = objectiveDetail;
   $("state-card-value").textContent = status;
   $("browser-status").textContent = status === "extracting" ? "reading" : isBusy ? "connected" : ["done", "answered"].includes(status) ? "complete" : "standby";
   $("browser-title").textContent = status === "extracting" ? "Reading the result" : isBusy ? "Session in progress" : ["done", "answered"].includes(status) ? "Session complete" : "Waiting for a session";
@@ -435,8 +449,28 @@ function render(snapshot) {
   startButton.querySelector("span:first-child").textContent = status === "extracting" ? "Reading result" : isBusy ? "Task running" : canContinue ? "Continue task" : "Run task";
   renderLog(snapshot.steps);
   renderResult(snapshot.result);
-  renderResultHistory(snapshot.result_history);
+  renderResultHistory(snapshot.result_history, Boolean(snapshot.result));
   maybeRunVoiceQueue();
+}
+
+function exportResults() {
+  if (!latestSnapshot?.result && !latestSnapshot?.result_history?.length) return;
+  const payload = {
+    exported_at: new Date().toISOString(),
+    goal: latestSnapshot.goal || "",
+    url: latestSnapshot.url || "",
+    result: latestSnapshot.result || null,
+    result_history: Array.isArray(latestSnapshot.result_history) ? latestSnapshot.result_history : [],
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const downloadUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = `rove-result-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
 }
 
 async function submitTask(continuation) {
@@ -542,6 +576,7 @@ stopButton.addEventListener("click", stopTask);
 fullscreenButton.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", renderFullscreenButton);
 resultDetails.addEventListener("click", () => sessionResultsDialog.showModal());
+resultExport.addEventListener("click", exportResults);
 closeResults.addEventListener("click", () => sessionResultsDialog.close());
 sessionResultsDialog.addEventListener("click", (event) => {
   if (event.target === sessionResultsDialog) sessionResultsDialog.close();

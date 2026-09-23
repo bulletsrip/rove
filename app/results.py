@@ -19,15 +19,17 @@ Classify the outcome:
 
 Verification:
 1. Read the goal as an outcome, not as a list of browser actions.
-2. Ground every fact and item in the supplied final page or visible result.
+2. Ground every fact and item in the supplied final page, full page text, visible result, or supplied page links.
 3. Use action history as context for how the page was reached; the final evidence determines completion.
 4. Preserve observed names, places, values, and search terms.
-5. Return needs_review when the requested evidence is absent, incomplete, or visibly contradicted.
+5. Use visible links as evidence for requested URLs; do not invent URLs from titles.
+6. Return needs_review when the requested evidence is absent, incomplete, or visibly contradicted.
 
 Output rules:
 - summary is concise and useful.
 - facts is an object of short label/value strings; use {} when no single-value facts are available.
 - items is an ordered list of extracted strings; use [] when no list is requested or visible.
+- For a collection request, return at most the requested number of items. Keep each item to one compact line using the requested fields, separated by " | ". Do not add commentary inside items.
 - source_url is the supplied page URL unless the page visibly provides a more specific source URL.
 - Report only the evidence contained in the supplied input. Do not estimate, infer missing values, or claim unseen pages."""
 
@@ -90,8 +92,29 @@ def _validate_result(value, fallback_url, *, goal=""):
     }
 
 
+def _compact_page_links(page):
+    """Keep evidence useful without flooding the verifier with duplicate DOM links."""
+    candidates = []
+    seen_urls = set()
+    for link in page.get("page_links", []):
+        if not isinstance(link, dict) or not link.get("url"):
+            continue
+        url = link["url"]
+        context = f"{link.get('text', '')} {link.get('classes', '')}".strip()
+        label = str(link.get("label", "")).strip()
+        navigation = bool(re.search(r"\b(?:next|previous|page\s+\d+|load more)\b", label, re.I))
+        score = 3 if navigation else 2 if context else 1
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        candidates.append({"label": label, "url": url, "context": context[:500], "score": score})
+    candidates.sort(key=lambda item: (-item["score"], item["url"]))
+    return [{key: item[key] for key in ("label", "url", "context")} for item in candidates[:60]]
+
+
 def extract_result(goal, page, history, *, request_json: Callable | None = None, api_key=None, base_url=None):
     """Verify and summarize the final observed page for a completed task."""
+    use_default_requester = request_json is None
     if request_json is None:
         from jev_ultrafast.model import post_json
 
@@ -100,9 +123,16 @@ def extract_result(goal, page, history, *, request_json: Callable | None = None,
     if not api_key:
         raise ResultExtractionUnavailable("TEXT_MODEL_API_KEY is not configured")
     base_url = (base_url or os.getenv("TEXT_MODEL_BASE_URL", "https://api.deepseek.com/v1")).rstrip("/")
+    page_links = _compact_page_links(page)
+    seen_urls = {link["url"] for link in page_links}
+    for action in page.get("actions", []):
+        url = action.get("href", "")
+        if url and url not in seen_urls and len(page_links) < 60:
+            page_links.append({"label": action.get("label", ""), "url": url, "context": ""})
+            seen_urls.add(url)
     body = {
         "model": os.getenv("TEXT_MODEL", "deepseek-chat"),
-        "max_tokens": 3000,
+        "max_tokens": 1800,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": RESULT_SYSTEM_PROMPT},
@@ -114,7 +144,9 @@ def extract_result(goal, page, history, *, request_json: Callable | None = None,
                         "final_page": {
                             "url": page.get("url"),
                             "title": page.get("title"),
-                            "text": (page.get("text") or "")[:12000],
+                            "text": (page.get("text") or "")[:6000],
+                            "visible_links": page_links,
+                            "full_text": (page.get("full_text") or page.get("text") or "")[:7000],
                         },
                         "recent_actions": [
                             {key: action.get(key) for key in ("action", "kind", "text", "url")}
@@ -126,7 +158,16 @@ def extract_result(goal, page, history, *, request_json: Callable | None = None,
             },
         ],
     }
-    response = request_json(base_url + "/chat/completions", api_key, body)
+    endpoint = base_url + "/chat/completions"
+    if use_default_requester:
+        response = request_json(
+            endpoint,
+            api_key,
+            body,
+            timeout=float(os.getenv("TEXT_MODEL_RESULT_TIMEOUT", "90")),
+        )
+    else:
+        response = request_json(endpoint, api_key, body)
     try:
         content = response["choices"][0]["message"]["content"]
         return _validate_result(_parse_content(content), page.get("url", ""), goal=goal)

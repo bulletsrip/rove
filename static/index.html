@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#090d11" />
     <meta name="description" content="Rove is a focused interface for running browser tasks in a live session." />
-    <title>Rove — live browser tasks</title>
+    <title>rove</title>
     <script>
       if ("scrollRestoration" in history) history.scrollRestoration = "manual";
       if (localStorage.getItem("rove-theme") === "light") document.documentElement.dataset.theme = "light";
@@ -197,10 +197,15 @@
             <dl id="result-facts" class="result-facts"></dl>
             <ol id="result-items" class="result-items"></ol>
             <a id="result-source" class="result-source" href="#" target="_blank" rel="noreferrer" hidden>Open source <span aria-hidden="true">↗</span></a>
-            <button id="result-details" class="result-details" type="button" disabled>
-              <span>View session details</span>
-              <span class="result-details-count" data-result-count>0</span>
-            </button>
+            <div class="result-actions">
+              <button id="result-details" class="result-details" type="button" disabled>
+                <span>View session details</span>
+                <span class="result-details-count" data-result-count>0</span>
+              </button>
+              <button id="result-export" class="result-export" type="button" aria-label="Export results" disabled>
+                <span class="export-glyph" aria-hidden="true"></span>
+              </button>
+            </div>
           </article>
 
           <article class="bento-card state-card">
