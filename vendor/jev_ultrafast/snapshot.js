@@ -60,6 +60,7 @@
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:name(e)||(e.matches(closeSelector) ? 'Close' : rname),
+      href:e.tagName==='A' ? e.href : '',
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
@@ -90,7 +91,12 @@
       words.push(value); length+=value.length;
     }
   }
-  const text=words.join('\n').slice(0,6000), height=document.documentElement.scrollHeight;
+  const text=words.join('\n').slice(0,6000), full_text=(document.body.innerText||'').slice(0,12000), height=document.documentElement.scrollHeight;
+  const page_links=[...document.querySelectorAll('a[href]')].filter(e=>safe(e)).slice(0,500).map(e=>{
+    const scope=e.closest('article,li,tr,[role="listitem"]') || e.parentElement;
+    const classes=scope ? [...scope.querySelectorAll('[class]')].map(node=>String(node.className||'')).join(' ').slice(0,1200) : '';
+    return {label:name(e),url:e.href,text:(scope?.innerText||'').slice(0,1200),classes};
+  });
   const scrollContainers=[];
   for (const e of document.querySelectorAll('*')) {
     if (scrollContainers.length>=80 || !visible(e)) continue;
@@ -119,6 +125,6 @@
   actions.push({id:'reload',kind:'reload',label:'Reload the page'});
   actions.push({id:'key_enter',kind:'key',label:'Press Enter',key:'Enter',code:'Enter'});
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
-  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
+  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,full_text,page_links,
     scroll,actions,marker,page_key,guards,omitted_actions};
 })()

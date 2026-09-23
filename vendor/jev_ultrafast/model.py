@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 import time
 
 import httpx
@@ -12,13 +13,20 @@ from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 CLIENT = httpx.Client(http2=True, timeout=25)
 
 
-def post_json(url, key, body):
+def post_json(url, key, body, *, timeout=25):
     for attempt in range(3):
         try:
-            response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
-        except httpx.HTTPError:
-            raise RuntimeError("Model connection failed; no action executed.") from None
-        if response.status_code in {429, 529, 503} and attempt < 2:
+            response = CLIENT.post(
+                url,
+                json=body,
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(
+                f"Model connection failed ({type(exc).__name__}); no action executed."
+            ) from None
+        if response.status_code in {429, 503, 504, 529} and attempt < 2:
             time.sleep(0.5 * 2**attempt)
             continue
         if response.is_error:
@@ -45,8 +53,37 @@ def validate_choice(answer, ids):
     return answer
 
 
-def action_space(actions):
+def _is_collection_navigation(action):
+    label = str(action.get("label", "")).strip().lower()
+    href = str(action.get("href", "")).lower()
+    return bool(
+        re.search(r"^(?:next|load more|older|more results|next page)$", label)
+        or re.search(r"\bpage\s*\d+\b", label)
+        or label.isdigit()
+        or re.search(r"[?&](?:page|p)=\d+", href)
+    )
+
+
+def _is_collection_item_control(action):
+    label = str(action.get("label", "")).strip().lower()
+    return bool(re.search(r"\b(?:add to (?:basket|cart)|buy|favorite|favourite|wishlist|share)\b", label))
+
+
+def action_space(actions, collection_mode=False):
     """One index per observed element; each operation has its own valid target choices."""
+    if collection_mode:
+        item_links = [
+            action
+            for action in actions
+            if action.get("kind") == "click"
+            and action.get("role") == "link"
+            and action.get("href")
+            and not _is_collection_navigation(action)
+        ]
+        if len(item_links) >= 3:
+            hidden = {id(action) for action in item_links}
+            hidden.update(id(action) for action in actions if _is_collection_item_control(action))
+            actions = [action for action in actions if id(action) not in hidden]
     elements, indices, targets, controls = [], {}, {}, {}
     operations = {"click": "CLICK", "fill": "TYPE_TEXT", "select": "SELECT"}
     for action in actions:
@@ -58,7 +95,7 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded", "href") if k in action and action[k]}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -78,8 +115,8 @@ def action_space(actions):
     return elements, targets, controls
 
 
-def choose(state, goal, history, continuation_context=None, run_history_start=0):
-    elements, targets, controls = action_space(state["actions"])
+def choose(state, goal, history, continuation_context=None, run_history_start=0, collection_mode=False):
+    elements, targets, controls = action_space(state["actions"], collection_mode=collection_mode)
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
@@ -87,7 +124,9 @@ def choose(state, goal, history, continuation_context=None, run_history_start=0)
     }
     operations = {key: labels[key] for key in targets}
     operations.update({key: value["label"] for key, value in controls.items()})
-    operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
+    operations.update(BLOCKED="No supported operation can progress.")
+    if not collection_mode or history[run_history_start:]:
+        operations["DONE"] = "Every requirement is visibly satisfied."
     questions = {
         "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
     }
@@ -98,14 +137,18 @@ def choose(state, goal, history, continuation_context=None, run_history_start=0)
                 index: {
                     "element": f"[{index}] {a['label']}",
                     "current_value": a.get("current_value", a.get("value", "")),
+                    "href": a.get("href", ""),
                     **{k: a[k] for k in ("role", "checked", "selected", "expanded") if k in a},
                 }
                 for index, a in candidates.items()
             },
             "instructions": {"goal": goal, "operation": operation, "rules": TARGET},
         }
+    page_state = {k: state[k] for k in ("url", "title", "text")}
+    if collection_mode:
+        page_state["full_text"] = state.get("full_text", state.get("text", ""))[:12000]
     request_state = {
-        "page": {k: state[k] for k in ("url", "title", "text")},
+        "page": page_state,
         "elements": elements,
         "recent_actions": [
             {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
@@ -115,6 +158,8 @@ def choose(state, goal, history, continuation_context=None, run_history_start=0)
             for h in history[run_history_start:][-10:]
         ],
     }
+    if collection_mode:
+        request_state["collection_mode"] = True
     last_action = history[-1] if history else None
     if last_action and last_action.get("page_changed") is False:
         request_state["no_progress"] = {

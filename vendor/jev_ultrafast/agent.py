@@ -1,6 +1,7 @@
 """The complete agent loop. Typed choices, observable state, bounded execution."""
 
 import base64
+import json
 import re
 import time
 from pathlib import Path
@@ -19,8 +20,33 @@ def _is_single_primitive_goal(goal):
     )
 
 
+def _progress_signature(page):
+    """Capture meaningful page state while ignoring transient DOM identities."""
+    actions = [
+        {
+            key: action.get(key)
+            for key in ("kind", "role", "label", "value", "checked", "selected", "expanded", "href")
+        }
+        for action in page.get("actions", [])
+    ]
+    scroll = page.get("scroll") or {}
+    containers = [tuple(container[:3]) for container in scroll.get("containers", []) if len(container) >= 3]
+    return json.dumps(
+        {
+            "url": page.get("url"),
+            "title": page.get("title"),
+            "text": page.get("text"),
+            "actions": actions,
+            "scroll": {"y": scroll.get("y"), "containers": containers},
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+
+
 class Agent:
-    def __init__(self, url, goals, *, record_dir=None, screenshots=False):
+    def __init__(self, url, goals, *, record_dir=None, screenshots=False, collection=False):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
             raise ValueError("Supply a task")
@@ -29,6 +55,7 @@ class Agent:
         self.stop_event = None
         self.no_progress_key = None
         self.no_progress_count = 0
+        self.transition_counts = {}
         self.browser = Browser(url)
         self.record_dir = Path(record_dir) if record_dir else None
         self.screenshots = screenshots or bool(record_dir)
@@ -55,6 +82,7 @@ class Agent:
             started_at=None,
             run_history_start=0,
             record=bool(self.record_dir),
+            collection_mode=collection,
         )
         if self.record_dir:
             self.record_dir.mkdir(parents=True, exist_ok=True)
@@ -72,11 +100,17 @@ class Agent:
         self.pending_text = None
         self.no_progress_key = None
         self.no_progress_count = 0
+        self.transition_counts = {}
         context = context or {}
         continuation_context = {
             "previous_goal": context.get("previous_goal") or self.state.get("goal", ""),
             "previous_result": context.get("previous_result"),
         }
+        if "completed_objectives" in context:
+            continuation_context["completed_objectives"] = context["completed_objectives"]
+        for key in ("collection_iteration", "collected_items"):
+            if key in context:
+                continuation_context[key] = context[key]
         self.state.update(
             goal=task,
             goal_history=[*self.state.get("goal_history", []), task],
@@ -131,6 +165,7 @@ class Agent:
                 state["history"],
                 state.get("continuation_context"),
                 state.get("run_history_start", 0),
+                state.get("collection_mode", False),
             )
             state["decisions"].append(
                 {
@@ -212,18 +247,27 @@ class Agent:
                     base64.b64decode(state["page"]["screenshot"])
                 )
             page_changed = state["history"][-1]["page_changed"]
-            progress_key = (action["kind"], action["id"], page["fingerprint"])
-            if page_changed:
-                self.no_progress_key = None
-                self.no_progress_count = 0
-            elif progress_key == self.no_progress_key:
+            progress_key = (action["kind"], action["id"], _progress_signature(state["page"]))
+            if progress_key == self.no_progress_key:
                 self.no_progress_count += 1
             else:
                 self.no_progress_key = progress_key
                 self.no_progress_count = 1
-            stalled = not page_changed and self.no_progress_count >= 2
+            stalled = self.no_progress_count >= 2
+            transition_key = (
+                action["kind"],
+                action["id"],
+                _progress_signature(page),
+                _progress_signature(state["page"]),
+            )
+            self.transition_counts = getattr(self, "transition_counts", {})
+            self.transition_counts[transition_key] = self.transition_counts.get(transition_key, 0) + 1
+            cycling = self.transition_counts[transition_key] >= 2
             single_primitive = action["kind"] in {"scroll", "back", "reload", "key"} and _is_single_primitive_goal(state["goal"])
-            if stalled:
+            if cycling:
+                state["status"] = "blocked"
+                state["block_reason"] = "The same page transition repeated; the agent appears to be in a cycle."
+            elif stalled:
                 state["status"] = "blocked"
                 state["block_reason"] = "The same action produced no observable page progress twice."
             else:

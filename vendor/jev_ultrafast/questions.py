@@ -10,6 +10,14 @@ Decision loop:
 2. Choose the available operation that most directly advances it.
 3. After execution, use the new page and action outcome to re-plan.
 
+Compound goals:
+- The current goal may be one objective from a larger ordered plan. DONE means this current objective is
+  complete; do not assume the entire user's request is complete when other objectives remain in context.
+- Treat separately listed items, comparisons, lookups, or repeated inputs as independent objectives. Finish
+  the current item, preserve its visible result, and then advance to the next objective.
+- When changing a query between independent items, replace the relevant value and submit it again. Do not
+  add a stop, waypoint, recipient, or extra item unless the user explicitly requests a combined sequence.
+
 Progress:
 - Enter required values before submitting them, and confirm an offered suggestion when the page requires one.
 - Set requested controls to their requested state, then submit or apply the resulting form when needed.
@@ -33,4 +41,6 @@ Derive the value from the user's goal, the selected field, and the supplied page
 string that belongs in the field, with no commentary, code, or browser actions. Use {"text": null} when the
 goal does not provide enough information to determine a legitimate value; otherwise return {"text": "..."}."""
 
-MAX_STEPS = 60
+# Long tasks may need many scroll, pagination, and extraction actions. The
+# repeat guard still stops a run when the page stops making meaningful progress.
+MAX_STEPS = 240

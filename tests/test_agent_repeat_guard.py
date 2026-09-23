@@ -42,7 +42,7 @@ class StableAfterActionBrowser:
         return {
             "url": "https://example.test",
             "title": "Example",
-            "text": "",
+            "text": f"visible-state-{fingerprint}",
             "fingerprint": fingerprint,
             "page_key": fingerprint,
             "marker": fingerprint,
@@ -62,10 +62,50 @@ class StableAfterActionBrowser:
 class NoProgressBrowser(StableAfterActionBrowser):
     def observe(self, screenshot=True):
         page = super().observe(screenshot=screenshot)
+        page["text"] = "same-state"
         page["fingerprint"] = "same-page"
         page["page_key"] = "same-page"
         page["marker"] = "same-page"
         return page
+
+
+class DynamicFingerprintNoProgressBrowser(StableAfterActionBrowser):
+    def observe(self, screenshot=True):
+        page = super().observe(screenshot=screenshot)
+        page["text"] = "same-state"
+        page["fingerprint"] = f"transient-{self.observations}"
+        page["page_key"] = f"transient-{self.observations}"
+        page["marker"] = f"transient-{self.observations}"
+        return page
+
+
+class TwoStateCycleBrowser:
+    def __init__(self):
+        self.mode = "list"
+
+    def fresh(self, page, action=None):
+        return True
+
+    def act(self, action, page, text=None):
+        self.mode = "detail" if action["id"] == "open_book" else "list"
+        return {"executed": action["id"]}
+
+    def observe(self, screenshot=True):
+        if self.mode == "list":
+            return {
+                "url": "https://example.test/catalog",
+                "title": "Catalog",
+                "text": "Book listing",
+                "fingerprint": "catalog",
+                "actions": [{"id": "open_book", "kind": "click", "label": "Book A", "node": 1, "role": "link"}],
+            }
+        return {
+            "url": "https://example.test/book-a",
+            "title": "Book A",
+            "text": "Book detail",
+            "fingerprint": "book-a",
+            "actions": [{"id": "back", "kind": "back", "label": "Go back"}],
+        }
 
 
 class AgentRepetitionTest(unittest.TestCase):
@@ -130,6 +170,38 @@ class AgentRepetitionTest(unittest.TestCase):
 
         self.assertEqual(snapshot["status"], "blocked")
         self.assertEqual(len(snapshot["history"]), 2)
+
+    def test_dynamic_fingerprint_cannot_hide_repeated_action_without_progress(self):
+        self.agent.state["browser"] = DynamicFingerprintNoProgressBrowser()
+        for _ in range(2):
+            self.choose_search()
+            snapshot = self.agent.command("act", {"fingerprint": self.agent.state["page"]["fingerprint"]})
+
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertEqual(len(snapshot["history"]), 2)
+
+    def test_repeating_two_state_cycle_is_stopped(self):
+        browser = TwoStateCycleBrowser()
+        self.agent.state["browser"] = browser
+        self.agent.state["page"] = browser.observe()
+        for _ in range(4):
+            action = self.agent.state["page"]["actions"][0]
+            self.agent.state["decision"] = {
+                "choice": action["id"],
+                "operation": "CLICK" if action["kind"] == "click" else "BACK",
+                "target": "1" if action["kind"] == "click" else None,
+                "probabilities": {action["id"]: 1.0},
+                "confidence": 1.0,
+                "latency_ms": 0,
+                "usage": {},
+            }
+            snapshot = self.agent.command("act", {"fingerprint": self.agent.state["page"]["fingerprint"]})
+            if snapshot["status"] == "blocked":
+                break
+
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertLessEqual(len(snapshot["history"]), 3)
+        self.assertIn("cycle", snapshot["block_reason"])
 
     def test_standalone_primitive_finishes_after_one_execution(self):
         page = {
