@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local credentials and environment overrides. Keep the safe template tracked.
+.env
+.env.*
+!.env.example
+
+artifacts/
+*.log

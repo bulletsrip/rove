@@ -1,0 +1,15 @@
+services:
+  browser-use:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BU_CDP_URL: http://127.0.0.1:9222
+    ports:
+      # Restrict these ports with the VPS firewall if they should not be public.
+      - "8080:8080"
+      - "5900:5900"
+      - "6080:6080"
+      - "9222:9222"
+    shm_size: 2gb

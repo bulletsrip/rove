@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rove live browser</title>
+    <style>
+      html,
+      body,
+      #screen {
+        width: 100%;
+        height: 100%;
+      }
+
+      html,
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #080d11;
+      }
+
+      html[data-theme="light"],
+      html[data-theme="light"] body,
+      html[data-theme="light"] #screen,
+      html[data-theme="light"] #screen canvas {
+        background: #f2f7f7;
+      }
+
+      #screen {
+        position: relative;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="screen"></div>
+    <script type="module">
+      import RFB from "./core/rfb.js";
+
+      const params = new URLSearchParams(window.location.search);
+      document.documentElement.dataset.theme = params.get("theme") === "light" ? "light" : "dark";
+      const host = params.get("host") || window.location.hostname;
+      const port = params.get("port") || window.location.port;
+      const path = params.get("path") || "websockify";
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const socket = `${protocol}://${host}${port ? `:${port}` : ""}/${path}`;
+      const screen = document.getElementById("screen");
+      let reconnectTimer;
+      let rfb;
+      let inputEnabled = false;
+
+      function reconnect() {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, 800);
+      }
+
+      function connect() {
+        try {
+          rfb?.disconnect();
+        } catch (_) {
+          // The previous socket may already be gone.
+        }
+
+        try {
+          rfb = new RFB(screen, socket, {
+            credentials: { password: params.get("password") || "" },
+          });
+          rfb.viewOnly = !inputEnabled && (params.get("view_only") === "true" || params.get("view_only") === "1");
+          rfb.scaleViewport = params.get("scale") === "true" || params.get("scale") === "1";
+          rfb.resizeSession = false;
+          rfb.addEventListener("disconnect", reconnect);
+        } catch (_) {
+          reconnect();
+        }
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.data?.type === "rove-theme") {
+          document.documentElement.dataset.theme = event.data.theme === "light" ? "light" : "dark";
+          return;
+        }
+        if (event.data?.type === "rove-input") {
+          inputEnabled = event.data.enabled === true;
+          if (rfb) rfb.viewOnly = !inputEnabled;
+        }
+      });
+
+      connect();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090d11" />
+    <meta name="description" content="Rove is a focused interface for running browser tasks in a live session." />
+    <title>Rove — live browser tasks</title>
+    <script>
+      if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+      if (localStorage.getItem("rove-theme") === "light") document.documentElement.dataset.theme = "light";
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/assets/rove-mark.svg" />
+    <link rel="apple-touch-icon" href="/assets/rove-mark.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="topbar reveal">
+      <a class="wordmark" href="/" aria-label="Rove home">
+        <span class="wordmark-mark" aria-hidden="true"><img src="/assets/rove-mark.svg" alt="" /></span>
+        <span>Rove</span>
+      </a>
+      <div class="topbar-center">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>live web agent</span>
+      </div>
+      <div class="topbar-right">
+        <span class="connection-label">ready when you are</span>
+        <span class="connection-line" aria-hidden="true"></span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode" aria-pressed="false">
+          <span class="theme-glyph" aria-hidden="true"></span>
+          <span id="theme-label">Light</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="hero reveal" aria-labelledby="hero-title">
+        <div class="hero-banner" aria-label="Rove live browser illustration">
+          <div class="banner-copy">
+            <p class="banner-kicker">A browser that works from a sentence</p>
+            <h1 id="hero-title">Put the web to work.</h1>
+            <p class="banner-lede">Describe the outcome. Watch a real browser navigate, click, and finish the job in front of you.</p>
+            <a class="text-link" href="#workbench">Start with a task <span aria-hidden="true">↘</span></a>
+          </div>
+          <div class="hero-illustration" aria-hidden="true">
+            <span class="illustration-sun"></span>
+            <span class="illustration-orbit orbit-one"></span>
+            <span class="illustration-orbit orbit-two"></span>
+            <span class="illustration-track track-one"></span>
+            <span class="illustration-track track-two"></span>
+            <div class="illustration-window">
+              <div class="illustration-window-top">
+                <span></span><span></span><span></span>
+                <small>rove / task</small>
+              </div>
+              <div class="illustration-window-body">
+                <div class="window-column">
+                  <i></i><i></i><i></i><i></i>
+                </div>
+                <div class="window-main">
+                  <b>Find the next move</b>
+                  <span></span><span></span>
+                  <div class="window-chip">LIVE ↗</div>
+                </div>
+              </div>
+            </div>
+            <div class="illustration-cursor">↗</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workbench reveal" id="workbench" aria-label="Browser task workbench">
+        <article class="task-panel surface">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">New task</p>
+              <h2>Give it a direction.</h2>
+            </div>
+          </div>
+
+          <form id="task-form">
+            <label class="field-label" for="url">Start from</label>
+            <div class="input-wrap">
+              <span class="input-prefix" aria-hidden="true">↗</span>
+              <input id="url" name="url" type="url" value="https://google.com" autocomplete="url" required />
+            </div>
+
+            <label class="field-label" for="goal">What should happen?</label>
+            <textarea id="goal" name="goal" maxlength="2000" required>Read the page title and stop.</textarea>
+
+            <div class="task-actions">
+              <div class="primary-actions">
+                <button id="start" class="primary-button" type="submit">
+                  <span>Run task</span>
+                  <span class="button-arrow" aria-hidden="true">↗</span>
+                </button>
+                <button id="stop" class="stop-button" type="button" hidden>
+                  <span>Stop</span>
+                  <span aria-hidden="true">×</span>
+                </button>
+                <button id="voice-inline" class="voice-inline" type="button" aria-label="Enable voice commands" aria-pressed="false">
+                  <span class="mic-glyph" aria-hidden="true"></span>
+                </button>
+              </div>
+              <button id="fresh" class="secondary-button" type="button">
+                <span>Start fresh</span>
+                <span aria-hidden="true">↻</span>
+              </button>
+            </div>
+          </form>
+
+          <div class="run-state" data-state="idle" aria-live="polite">
+            <span class="state-marker" aria-hidden="true"></span>
+            <div>
+              <strong id="state">Ready for a task</strong>
+              <span id="state-detail">The browser is waiting for an instruction.</span>
+            </div>
+          </div>
+          <p id="error" class="error-message" role="alert" hidden></p>
+        </article>
+
+        <article class="browser-panel surface" aria-label="Live browser session">
+          <div id="browser-stage" class="browser-stage">
+            <div class="browser-header">
+              <div>
+                <p class="section-kicker">Live browser</p>
+                <h2 id="browser-title">Waiting for a session</h2>
+              </div>
+              <div class="browser-signal">
+                <div class="browser-signal-top">
+                  <span class="status-dot" aria-hidden="true"></span>
+                  <span id="browser-status">standby</span>
+                  <button id="browser-fullscreen" class="browser-fullscreen" type="button" aria-label="Enter fullscreen browser view" aria-pressed="false">
+                    <span class="fullscreen-glyph" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="browser-signal-bottom">
+                  <div class="latest-action" aria-live="polite">
+                    <span class="latest-action-label">Latest</span>
+                    <span id="latest-action">No actions yet</span>
+                  </div>
+                  <button id="browser-input" class="browser-input" type="button" aria-label="Enable browser input" aria-pressed="false">
+                    <span class="mouse-glyph" aria-hidden="true"></span>
+                  </button>
+                  <button id="browser-voice" class="browser-voice" type="button" aria-label="Enable voice commands" aria-pressed="false">
+                    <span class="mic-glyph" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="browser-frame">
+              <div class="browser-frame-topline">
+                <span class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span class="frame-address" id="frame-address">about:blank</span>
+                <span class="frame-live">LIVE</span>
+              </div>
+              <iframe id="live" title="Live browser session"></iframe>
+              <div class="browser-empty" id="browser-empty">
+                <span class="empty-cross" aria-hidden="true">+</span>
+                <p>The session will appear here<br />when the task begins.</p>
+              </div>
+            </div>
+            <div class="browser-footer">
+              <span id="session-url">No active page</span>
+              <span>headful / CDP</span>
+            </div>
+            <aside id="voice-dock" class="voice-dock" aria-live="polite" hidden>
+              <button id="voice-toggle" class="voice-toggle" type="button" aria-pressed="false">
+                <span class="voice-orb" aria-hidden="true"></span>
+                <span id="voice-state">Voice off</span>
+              </button>
+              <span id="voice-transcript" class="voice-transcript">Tap the mic to speak a command</span>
+              <span class="voice-hint">auto-run</span>
+            </aside>
+          </div>
+        </article>
+      </section>
+
+      <section class="activity-section reveal" id="activity" aria-label="Session activity">
+        <div class="bento">
+          <article class="bento-card action-card">
+            <div class="card-topline"><span>Action history</span><span id="action-count">0 actions</span></div>
+            <ol id="log" class="action-log"><li class="empty-log">No actions yet.</li></ol>
+          </article>
+
+          <article id="result-card" class="bento-card result-card" aria-live="polite">
+            <div class="result-topline">
+              <span class="section-kicker">Rove result</span>
+              <span id="result-kind" class="result-kind">WAITING</span>
+            </div>
+            <h3 id="result-summary">Complete a task to see the verified result here.</h3>
+            <dl id="result-facts" class="result-facts"></dl>
+            <ol id="result-items" class="result-items"></ol>
+            <a id="result-source" class="result-source" href="#" target="_blank" rel="noreferrer" hidden>Open source <span aria-hidden="true">↗</span></a>
+            <button id="result-details" class="result-details" type="button" disabled>
+              <span>View session details</span>
+              <span class="result-details-count" data-result-count>0</span>
+            </button>
+          </article>
+
+          <article class="bento-card state-card">
+            <div class="card-topline"><span>Current state</span><span class="card-glyph" aria-hidden="true">↗</span></div>
+            <p class="big-state" id="state-card-value">idle</p>
+            <p class="card-note">The agent’s status updates as the session moves.</p>
+          </article>
+
+          <article class="bento-card context-card">
+            <div class="card-topline"><span>Task context</span><span class="card-glyph" aria-hidden="true">⌁</span></div>
+            <p class="context-value" id="context-value">No task loaded</p>
+            <p class="card-note">The current goal stays attached to the live run.</p>
+          </article>
+
+        </div>
+
+      </section>
+
+      <dialog id="session-results-dialog" class="session-results-dialog" aria-labelledby="session-results-title">
+        <div class="dialog-panel">
+          <div class="dialog-heading">
+            <div>
+              <p class="section-kicker">Session archive</p>
+              <h2 id="session-results-title">Every result from this session.</h2>
+            </div>
+            <button id="close-results" class="dialog-close" type="button" aria-label="Close session details">×</button>
+          </div>
+          <p class="dialog-lede">The main card shows the latest result. This archive keeps each completed instruction available.</p>
+          <div id="session-results-list" class="session-results-list"></div>
+        </div>
+      </dialog>
+
+      <section class="closing reveal" aria-label="Run another task">
+        <div>
+          <p class="eyebrow">The browser is ready</p>
+          <h2>Make the next instruction count.</h2>
+        </div>
+        <a class="outline-button" href="#workbench">Run another task <span aria-hidden="true">↗</span></a>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Rove / live task runner</span>
+      <span>made for the web in motion</span>
+    </footer>
+
+    <a class="floating-cta" href="#workbench">
+      <span class="floating-cta-dot" aria-hidden="true"></span>
+      <span>Run a task</span>
+      <span aria-hidden="true">↗</span>
+    </a>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Rove waypoint frame</title>
+  <rect x="4" y="4" width="56" height="56" rx="18" fill="#0d1b21"/>
+  <path d="M17 45V24a7 7 0 0 1 7-7h16" fill="none" stroke="#75e3f2" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+  <path d="M47 19v21a7 7 0 0 1-7 7H24" fill="none" stroke="#edf5f7" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+  <circle cx="40" cy="17" r="4" fill="#f3a06b"/>
+</svg>
